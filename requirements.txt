@@ -1,0 +1,5 @@
+streamlit
+youtube-search-python
+youtube_transcript_api
+ollama
+pandas
