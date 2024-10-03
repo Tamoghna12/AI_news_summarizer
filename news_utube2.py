@@ -1,53 +1,54 @@
 import streamlit as st
-from youtubesearchpython import VideosSearch
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi
-import ollama
 from openai import OpenAI
 from typing import List, Dict, Any
 import pandas as pd
 
-# Function to get YouTube videos based on search criteria
-
-# Function to check if Ollama model is available
-
 client = OpenAI(base_url="http://localhost:11434/v1", api_key="not-needed")
 
-
-def check_ollama_model(model: str) -> bool:
+# Function to get YouTube videos based on search criteria
+def get_videos(query: str, max_results: int, api_key: str) -> List[Dict[str, Any]]:
+    youtube = build('youtube', 'v3', developerKey=api_key)
     try:
-        ollama.list()
-        return model in [m['name'] for m in ollama.list()['models']]
-    except Exception:
-        return False
-
-
-def get_videos(query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-    try:
-        videos_search = VideosSearch(query, limit=max_results)
-        results = videos_search.result()['result']
+        search_response = youtube.search().list(
+            q=query,
+            part='snippet',
+            type='video',
+            maxResults=max_results,
+            order="viewCount"
+        ).execute()
 
         videos = []
-        for video in results:
-            try:
-                view_count = int(video['viewCount']['text'].replace(
-                    ',', '').replace(' views', ''))
-                if view_count > 10000:
-                    videos.append({
-                        'title': video['title'],
-                        'video_id': video['id'],
-                        'view_count': view_count,
-                        'thumbnail': video['thumbnails'][0]['url']
-                    })
-            except Exception as e:
-                st.warning(f"Error processing video {video['id']}: {str(e)}")
+        for item in search_response['items']:
+            if item['snippet']['liveBroadcastContent'] != 'live':  # Filter out live broadcasts
+                video_id = item['id']['videoId']
+
+                # Fetch video statistics
+                video_response = youtube.videos().list(
+                    part="statistics",
+                    id=video_id
+                ).execute()
+
+                if video_response['items']:
+                    statistics = video_response['items'][0]['statistics']
+                    view_count = int(statistics.get('viewCount', 0))
+
+                    if view_count > 10000:
+                        videos.append({
+                            'title': item['snippet']['title'],
+                            'video_id': video_id,
+                            'view_count': view_count,
+                            'thumbnail': item['snippet']['thumbnails']['default']['url']
+                        })
+
         return videos
-    except Exception as e:
-        st.error(f"An error occurred during search: {str(e)}")
+    except HttpError as e:
+        st.error(f"An error occurred: {e}")
         return []
 
 # Function to extract video transcript
-
-
 def get_transcript(video_id: str) -> str:
     try:
         transcript = YouTubeTranscriptApi.get_transcript(video_id)
@@ -56,9 +57,6 @@ def get_transcript(video_id: str) -> str:
     except Exception as e:
         st.error(f"Error getting transcript for video {video_id}: {str(e)}")
         return ""
-
-# Function to summarize text using Ollama
-
 
 def summarize_text(text: str, model: str) -> str:
     try:
@@ -78,24 +76,31 @@ def summarize_text(text: str, model: str) -> str:
         return ""
 
 # Streamlit app
-
-
 def main():
-    st.set_page_config(page_title="AI News Summarizer",
-                       page_icon="📰", layout="wide")
-    st.title("AI News Summarizer from YouTube using Ollama")
+    st.set_page_config(page_title="AI News Summarizer", page_icon="📰", layout="wide")
+
+    st.title("📰 AI News Summarizer from YouTube")
+    st.write("Automatically fetch and summarize trending AI news and tools from YouTube.")
 
     # Sidebar for configurations
     st.sidebar.header("Configuration")
+    
+    # API Key input
+    api_key = st.sidebar.text_input("Enter your YouTube API Key", type="password")
+
+    if not api_key:
+        st.sidebar.error("Please enter a valid API key")
+        return
+
     query = st.sidebar.text_input("Enter the search query", "AI tools news")
-    num_videos = st.sidebar.number_input(
-        "Number of videos", min_value=1, max_value=20, value=10)
-    model = st.sidebar.selectbox("Choose Ollama model", [
-                                 "llama3.1:8b", "mistral-nemo:12b-instruct-2407-q2_K", "phi3:latest", "wizardlm2:7b"])
+    num_videos = st.sidebar.number_input("Number of videos", min_value=1, max_value=20, value=10)
+    
+    # Ollama model selection
+    model = st.sidebar.selectbox("Choose Ollama model", ["llama3.1:8b", "mistral-nemo:12b-instruct-2407-q2_K", "phi3:latest", "wizardlm2:7b"])
 
     if st.sidebar.button("Fetch and Summarize Videos"):
         with st.spinner("Fetching videos..."):
-            videos = get_videos(query, max_results=num_videos)
+            videos = get_videos(query, max_results=num_videos, api_key=api_key)
 
         if not videos:
             st.warning("No videos found")
@@ -154,3 +159,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
