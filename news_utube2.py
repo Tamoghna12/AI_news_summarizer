@@ -2,12 +2,15 @@ import streamlit as st
 from youtubesearchpython import VideosSearch
 from youtube_transcript_api import YouTubeTranscriptApi
 import ollama
+from openai import OpenAI
 from typing import List, Dict, Any
 import pandas as pd
 
 # Function to get YouTube videos based on search criteria
 
 # Function to check if Ollama model is available
+
+client = OpenAI(base_url="http://localhost:11434/v1", api_key="not-needed")
 
 
 def check_ollama_model(model: str) -> bool:
@@ -59,9 +62,16 @@ def get_transcript(video_id: str) -> str:
 
 def summarize_text(text: str, model: str) -> str:
     try:
-        response = ollama.generate(
-            model=model, prompt=f"Summarize the following text:\n\n{text}")
-        summary = response['response']
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system",
+                    "content": "You are a helpful assistant that summarizes text."},
+                {"role": "user", "content": f"Summarize the following text:\n\n{text}"}
+            ],
+            max_tokens=150
+        )
+        summary = response.choices[0].message.content
         return summary
     except Exception as e:
         st.error(f"Error summarizing text: {str(e)}")
